@@ -3,7 +3,7 @@ import Papa from "papaparse";
 import {
   Upload, Ticket, Film, Loader2, KeyRound, Globe2, ClipboardPaste,
   ChevronDown, ExternalLink, Search, SlidersHorizontal, X, Star,
-  ArrowUpDown, Pencil, Check
+  ArrowUpDown, Pencil
 } from "lucide-react";
 
 const REGIONS = [
@@ -26,8 +26,54 @@ const SORT_FIELDS = [
   { key: "title", label: "Title", defaultDir: "asc", dirLabels: ["A → Z", "Z → A"] },
 ];
 
+// Nur diese Dienste werden angezeigt. Alles andere (Amazon-Channels etc.) wird ignoriert.
+// Erkennung über TMDB-ID und/oder Name; Namen mit "channel" werden nie akzeptiert.
+const SERVICES = [
+  {
+    key: "netflix", label: "Netflix", ids: [8, 1796], rx: /^netflix\b/i,
+    url: (q) => `https://www.netflix.com/search?q=${q}`,
+  },
+  {
+    key: "prime", label: "Amazon Prime Video", ids: [9, 2100], rx: /^amazon prime video/i,
+    url: (q) => `https://www.primevideo.com/search/?phrase=${q}`,
+  },
+  {
+    key: "mubi", label: "MUBI", ids: [11], rx: /^mubi\b/i,
+    url: (q) => `https://mubi.com/en/search/films?query=${q}`,
+  },
+  {
+    key: "ard", label: "ARD Mediathek", ids: [], rx: /^ard\b/i,
+    url: (q) => `https://www.ardmediathek.de/suche/${q}`,
+  },
+  {
+    key: "zdf", label: "ZDF Mediathek", ids: [], rx: /^zdf/i,
+    url: (q) => `https://www.zdf.de/suche?q=${q}`,
+  },
+  {
+    key: "arte", label: "ARTE", ids: [], rx: /^arte\b/i,
+    url: (q, region) => `https://www.arte.tv/${region === "FR" ? "fr" : region === "DE" ? "de" : "en"}/search/?q=${q}`,
+  },
+];
+
+function serviceFor(p) {
+  const name = p.provider_name || "";
+  if (/channel/i.test(name)) return null;
+  return SERVICES.find((sv) => sv.ids.includes(p.provider_id) || sv.rx.test(name)) || null;
+}
+
+// flatrate + free + ads zusammenführen, auf die Wunschdienste reduzieren, pro Dienst nur ein Eintrag
+function pickServices(regionData) {
+  const all = [...(regionData.flatrate || []), ...(regionData.free || []), ...(regionData.ads || [])];
+  const seen = new Map();
+  all.forEach((p) => {
+    const sv = serviceFor(p);
+    if (sv && !seen.has(sv.key)) seen.set(sv.key, { key: sv.key, label: sv.label, logo_path: p.logo_path });
+  });
+  return SERVICES.map((sv) => seen.get(sv.key)).filter(Boolean);
+}
+
 function PosterTile({ movie, onOpen }) {
-  const streaming = movie.status === "found" && movie.providers.flatrate?.length > 0;
+  const streaming = movie.status === "found" && movie.services?.length > 0;
   return (
     <button
       onClick={() => onOpen(movie)}
@@ -47,11 +93,6 @@ function PosterTile({ movie, onOpen }) {
         </div>
       )}
 
-      {streaming && (
-        <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-[#FFFFFF] flex items-center justify-center shadow">
-          <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
-        </span>
-      )}
 
       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col justify-end p-2">
         <p className="text-[12px] font-medium leading-tight text-white line-clamp-2">{movie.name}</p>
@@ -65,12 +106,12 @@ function PosterTile({ movie, onOpen }) {
         </div>
         {streaming && (
           <div className="flex gap-1 mt-1.5">
-            {movie.providers.flatrate.slice(0, 4).map((p) => (
+            {movie.services.map((sv) => (
               <img
-                key={p.provider_id}
-                src={`https://image.tmdb.org/t/p/w45${p.logo_path}`}
-                alt={p.provider_name}
-                title={p.provider_name}
+                key={sv.key}
+                src={`https://image.tmdb.org/t/p/w45${sv.logo_path}`}
+                alt={sv.label}
+                title={sv.label}
                 className="w-4 h-4 rounded-[3px]"
               />
             ))}
@@ -81,9 +122,10 @@ function PosterTile({ movie, onOpen }) {
   );
 }
 
-function DetailModal({ movie, onClose }) {
+function DetailModal({ movie, region, onClose }) {
   if (!movie) return null;
-  const { flatrate = [], rent = [], buy = [] } = movie.providers || {};
+  const q = encodeURIComponent(movie.name);
+  const services = movie.services || [];
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -114,33 +156,30 @@ function DetailModal({ movie, onClose }) {
             )}
           </div>
 
-          <div className="mt-4 space-y-3">
-            <div>
-              <p className="text-[11px] font-mono uppercase tracking-wide text-[#888888] mb-1.5">Subscription</p>
-              {flatrate.length ? (
-                <div className="flex flex-wrap gap-2">
-                  {flatrate.map((p) => (
-                    <div key={p.provider_id} className="flex items-center gap-1.5 bg-[#111111] rounded-md px-2 py-1">
-                      <img src={`https://image.tmdb.org/t/p/w45${p.logo_path}`} className="w-5 h-5 rounded-[4px]" alt="" />
-                      <span className="text-xs">{p.provider_name}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-[#888888] font-mono">Not on any subscription service here.</p>
-              )}
-            </div>
-            {rent.length > 0 && (
-              <div>
-                <p className="text-[11px] font-mono uppercase tracking-wide text-[#888888] mb-1.5">Rent</p>
-                <p className="text-xs text-[#B3B3B3]">{rent.map((p) => p.provider_name).join(", ")}</p>
+          <div className="mt-4">
+            <p className="text-[11px] font-mono uppercase tracking-wide text-[#888888] mb-1.5">Available on</p>
+            {services.length ? (
+              <div className="flex flex-col gap-2">
+                {services.map((sv) => {
+                  const def = SERVICES.find((x) => x.key === sv.key);
+                  return (
+                    <a
+                      key={sv.key}
+                      href={def.url(q, region)}
+                      target="_blank" rel="noreferrer"
+                      className="flex items-center justify-between gap-2 bg-[#111111] border border-[#333333] hover:border-[#FFFFFF] rounded-md px-2.5 py-2 transition"
+                    >
+                      <span className="flex items-center gap-2 min-w-0">
+                        <img src={`https://image.tmdb.org/t/p/w45${sv.logo_path}`} className="w-5 h-5 rounded-[4px]" alt="" />
+                        <span className="text-sm truncate">{sv.label}</span>
+                      </span>
+                      <ExternalLink className="w-3.5 h-3.5 text-[#888888] shrink-0" />
+                    </a>
+                  );
+                })}
               </div>
-            )}
-            {buy.length > 0 && (
-              <div>
-                <p className="text-[11px] font-mono uppercase tracking-wide text-[#888888] mb-1.5">Buy</p>
-                <p className="text-xs text-[#B3B3B3]">{buy.map((p) => p.provider_name).join(", ")}</p>
-              </div>
+            ) : (
+              <p className="text-xs text-[#888888] font-mono">Not on any of your services.</p>
             )}
           </div>
 
@@ -164,7 +203,7 @@ export default function ReelCheck() {
     try { return localStorage.getItem("reelcheck_tmdb_key") || ""; } catch { return ""; }
   });
   const [region, setRegion] = useState(() => {
-    try { return localStorage.getItem("reelcheck_region") || "US"; } catch { return "US"; }
+    try { return localStorage.getItem("reelcheck_region") || "DE"; } catch { return "DE"; }
   });
 
   useEffect(() => {
@@ -288,11 +327,7 @@ export default function ReelCheck() {
       tmdbId: match.id,
       poster_path: match.poster_path,
       voteAverage: match.vote_average,
-      providers: {
-        flatrate: regionData.flatrate || [],
-        rent: regionData.rent || [],
-        buy: regionData.buy || [],
-      },
+      services: pickServices(regionData),
     };
   }
 
@@ -335,14 +370,16 @@ export default function ReelCheck() {
     setShowSetup(false);
   }
 
+  // Immer alle Wunschdienste zeigen (mit Anzahl Treffer), Logo aus den Ergebnissen
   const services = useMemo(() => {
-    const map = new Map();
-    movies.forEach((m) => {
-      (m.providers?.flatrate || []).forEach((p) => {
-        if (!map.has(p.provider_id)) map.set(p.provider_id, p);
+    return SERVICES.map((sv) => {
+      let count = 0, logo_path = null;
+      movies.forEach((m) => {
+        const hit = (m.services || []).find((x) => x.key === sv.key);
+        if (hit) { count++; logo_path = logo_path || hit.logo_path; }
       });
+      return { key: sv.key, label: sv.label, count, logo_path };
     });
-    return Array.from(map.values()).sort((a, b) => a.provider_name.localeCompare(b.provider_name));
   }, [movies]);
 
   const toggleService = (id) => {
@@ -355,10 +392,8 @@ export default function ReelCheck() {
 
   // true if a movie streams on at least one currently-enabled service
   const matchesServices = (m) => {
-    const flat = m.providers?.flatrate || [];
-    if (m.status !== "found" || flat.length === 0) return false;
-    if (services.length > 0 && flat.every((p) => disabledServices.has(p.provider_id))) return false;
-    return true;
+    if (m.status !== "found") return false;
+    return (m.services || []).some((sv) => !disabledServices.has(sv.key));
   };
 
   const visibleMovies = useMemo(() => {
@@ -523,24 +558,24 @@ export default function ReelCheck() {
 
                 <label className="flex items-center gap-2 text-xs font-mono text-[#B3B3B3] bg-[#0D0D0D] border border-[#333333] rounded-md px-3 py-2 cursor-pointer select-none">
                   <input type="checkbox" checked={freeOnly} onChange={(e) => setFreeOnly(e.target.checked)} className="accent-[#FFFFFF]" />
-                  Only free to watch
+                  Only streamable
                   <span className="text-[#FFFFFF]">({freeCount})</span>
                 </label>
               </div>
 
-              {services.length > 0 && (
+              {movies.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[10px] font-mono uppercase tracking-wide text-[#888888] flex items-center gap-1"><SlidersHorizontal className="w-3 h-3" /> Services</span>
                   {services.map((s) => {
-                    const on = !disabledServices.has(s.provider_id);
+                    const on = !disabledServices.has(s.key);
                     return (
                       <button
-                        key={s.provider_id}
-                        onClick={() => toggleService(s.provider_id)}
+                        key={s.key}
+                        onClick={() => toggleService(s.key)}
                         className={`flex items-center gap-1.5 rounded-full pl-1 pr-2.5 py-1 text-xs border transition ${on ? "border-[#FFFFFF] bg-[#FFFFFF]/10 text-[#FFFFFF]" : "border-[#333333] text-[#777777] grayscale"}`}
                       >
-                        <img src={`https://image.tmdb.org/t/p/w45${s.logo_path}`} alt="" className="w-4 h-4 rounded-full" />
-                        {s.provider_name}
+                        {s.logo_path && <img src={`https://image.tmdb.org/t/p/w45${s.logo_path}`} alt="" className="w-4 h-4 rounded-full" />}
+                        {s.label} <span className="text-[#888888]">{s.count}</span>
                       </button>
                     );
                   })}
@@ -562,7 +597,7 @@ export default function ReelCheck() {
         )}
       </main>
 
-      <DetailModal movie={activeMovie} onClose={() => setActiveMovie(null)} />
+      <DetailModal movie={activeMovie} region={region} onClose={() => setActiveMovie(null)} />
 
     </div>
   );

@@ -34,6 +34,17 @@ function loadLibrary() {
   return null;
 }
 
+// DVD/Blu-ray-Shops. Suchbegriff = Titel + "+DVD+Blu-ray". Links bei Bedarf hier anpassen.
+const EBAY_HOST = {
+  DE: "www.ebay.de", GB: "www.ebay.co.uk", US: "www.ebay.com", FR: "www.ebay.fr", ES: "www.ebay.es",
+  IT: "www.ebay.it", NL: "www.ebay.nl", IE: "www.ebay.ie", CA: "www.ebay.ca", AU: "www.ebay.com.au", PL: "www.ebay.pl",
+};
+const SHOPS = [
+  { key: "medimops", label: "Medimops", url: (q) => `https://www.medimops.de/produkte-C0/?fcIsSearch=1&searchparam=${q}` },
+  { key: "ebay", label: "eBay", url: (q, region) => `https://${EBAY_HOST[region] || "www.ebay.de"}/sch/i.html?_nkw=${q}` },
+];
+const physicalQuery = (title) => encodeURIComponent(title).replace(/%20/g, "+") + "+DVD+Blu-ray";
+
 const SORT_FIELDS = [
   { key: "date", label: "Date added", defaultDir: "desc", dirLabels: ["Newest added", "Earliest added"] },
   { key: "year", label: "Release year", defaultDir: "desc", dirLabels: ["Newest first", "Earliest first"] },
@@ -196,6 +207,23 @@ function DetailModal({ movie, region, onClose }) {
             ) : (
               <p className="text-xs text-[#888888] font-mono">Not on any of your services.</p>
             )}
+          </div>
+
+          <div className="mt-4">
+            <p className="text-[11px] font-mono uppercase tracking-wide text-[#888888] mb-1.5">DVD / Blu-ray</p>
+            <div className="flex gap-2">
+              {SHOPS.map((sh) => (
+                <a
+                  key={sh.key}
+                  href={sh.url(physicalQuery(movie.localTitle || movie.name), region)}
+                  target="_blank" rel="noreferrer"
+                  className="flex-1 flex items-center justify-between gap-2 bg-[#111111] border border-[#333333] hover:border-[#FFFFFF] rounded-md px-2.5 py-2 transition"
+                >
+                  <span className="text-sm">{sh.label}</span>
+                  <ExternalLink className="w-3.5 h-3.5 text-[#888888] shrink-0" />
+                </a>
+              ))}
+            </div>
           </div>
 
           {movie.tmdbId && (
@@ -600,11 +628,20 @@ export default function ReelCheck() {
                   {SORT_FIELDS.find((f) => f.key === sortField).dirLabels[sortDir === SORT_FIELDS.find((f) => f.key === sortField).defaultDir ? 0 : 1]}
                 </button>
 
-                <label className="flex items-center gap-2 text-xs font-mono text-[#B3B3B3] bg-[#0D0D0D] border border-[#333333] rounded-md px-3 py-2 cursor-pointer select-none">
-                  <input type="checkbox" checked={freeOnly} onChange={(e) => setFreeOnly(e.target.checked)} className="accent-[#FFFFFF]" />
-                  Only streamable
-                  <span className="text-[#FFFFFF]">({freeCount})</span>
-                </label>
+                <div className="flex rounded-md border border-[#333333] overflow-hidden text-xs font-mono">
+                  <button
+                    onClick={() => setFreeOnly(true)}
+                    className={`px-3 py-2 ${freeOnly ? "bg-[#FFFFFF] text-[#111111]" : "bg-[#0D0D0D] text-[#B3B3B3]"}`}
+                  >
+                    Streamable ({freeCount})
+                  </button>
+                  <button
+                    onClick={() => setFreeOnly(false)}
+                    className={`px-3 py-2 ${!freeOnly ? "bg-[#FFFFFF] text-[#111111]" : "bg-[#0D0D0D] text-[#B3B3B3]"}`}
+                  >
+                    Show all ({movies.length})
+                  </button>
+                </div>
               </div>
 
               {movies.length > 0 && (

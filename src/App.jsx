@@ -19,6 +19,21 @@ const REGIONS = [
   { code: "PL", label: "Poland" }, { code: "ZA", label: "South Africa" },
 ];
 
+const REGION_LANG = {
+  DE: "de-DE", FR: "fr-FR", ES: "es-ES", IT: "it-IT", NL: "nl-NL", SE: "sv-SE", NO: "nb-NO",
+  DK: "da-DK", JP: "ja-JP", BR: "pt-BR", MX: "es-MX", PL: "pl-PL", GB: "en-GB",
+};
+
+// Lokale Speicherung der Bibliothek (nur im Browser dieses Geräts, nichts online)
+const STORE_KEY = "gg_library_v2";
+function loadLibrary() {
+  try {
+    const d = JSON.parse(localStorage.getItem(STORE_KEY));
+    if (d && Array.isArray(d.movies)) return d;
+  } catch {}
+  return null;
+}
+
 const SORT_FIELDS = [
   { key: "date", label: "Date added", defaultDir: "desc", dirLabels: ["Newest added", "Earliest added"] },
   { key: "year", label: "Release year", defaultDir: "desc", dirLabels: ["Newest first", "Earliest first"] },
@@ -57,7 +72,7 @@ const SERVICES = [
 
 function serviceFor(p) {
   const name = p.provider_name || "";
-  if (/channel/i.test(name)) return null;
+  if (/channel|\bplus\b/i.test(name)) return null; // keine Amazon-Channels, kein "ARD Plus"
   return SERVICES.find((sv) => sv.ids.includes(p.provider_id) || sv.rx.test(name)) || null;
 }
 
@@ -124,7 +139,7 @@ function PosterTile({ movie, onOpen }) {
 
 function DetailModal({ movie, region, onClose }) {
   if (!movie) return null;
-  const q = encodeURIComponent(movie.name);
+  const q = encodeURIComponent(movie.localTitle || movie.name);
   const services = movie.services || [];
   return (
     <div
@@ -184,13 +199,24 @@ function DetailModal({ movie, region, onClose }) {
           </div>
 
           {movie.tmdbId && (
-            <a
-              href={`https://www.themoviedb.org/movie/${movie.tmdbId}`}
-              target="_blank" rel="noreferrer"
-              className="text-xs text-[#FFFFFF] hover:underline inline-flex items-center gap-1 mt-4"
-            >
-              View on TMDB <ExternalLink className="w-3 h-3" />
-            </a>
+            <div className="mt-4 flex flex-col gap-1.5">
+              {movie.watchLink && (
+                <a
+                  href={movie.watchLink}
+                  target="_blank" rel="noreferrer"
+                  className="text-xs text-[#FFFFFF] hover:underline inline-flex items-center gap-1"
+                >
+                  Direct links on TMDB <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+              <a
+                href={`https://www.themoviedb.org/movie/${movie.tmdbId}`}
+                target="_blank" rel="noreferrer"
+                className="text-xs text-[#B3B3B3] hover:underline inline-flex items-center gap-1"
+              >
+                View on TMDB <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
           )}
         </div>
       </div>
@@ -213,15 +239,24 @@ export default function ReelCheck() {
   useEffect(() => {
     try { localStorage.setItem("reelcheck_region", region); } catch {}
   }, [region]);
+  const [saved] = useState(loadLibrary);
+  const [checkedRegion, setCheckedRegion] = useState(saved?.region || "DE");
+  const [checkedAt, setCheckedAt] = useState(saved?.at || null);
+
+  // Browser bitten, den lokalen Speicher nicht automatisch zu löschen
+  useEffect(() => {
+    try { navigator.storage?.persist?.(); } catch {}
+  }, []);
+
   const [mode, setMode] = useState("csv");
   const [pasteText, setPasteText] = useState("");
-  const [fileName, setFileName] = useState("");
-  const [parsedTitles, setParsedTitles] = useState([]);
-  const [movies, setMovies] = useState([]);
-  const [status, setStatus] = useState("idle");
+  const [fileName, setFileName] = useState(saved?.fileName || "");
+  const [parsedTitles, setParsedTitles] = useState(saved?.titles || []);
+  const [movies, setMovies] = useState(saved?.movies || []);
+  const [status, setStatus] = useState(saved?.movies?.length ? "done" : "idle");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [error, setErrorMsg] = useState("");
-  const [showSetup, setShowSetup] = useState(true);
+  const [showSetup, setShowSetup] = useState(!saved?.movies?.length);
   const fileInputRef = useRef(null);
 
   // library controls
@@ -308,6 +343,7 @@ export default function ReelCheck() {
   async function searchAndFetch(t, key, region) {
     const searchUrl = new URL("https://api.themoviedb.org/3/search/movie");
     searchUrl.searchParams.set("query", t.name);
+    searchUrl.searchParams.set("language", REGION_LANG[region] || "en-US");
     if (t.year) searchUrl.searchParams.set("year", t.year);
     let sData = await tmdbFetch(searchUrl.toString(), key);
     let match = sData.results && sData.results[0];
@@ -327,6 +363,8 @@ export default function ReelCheck() {
       tmdbId: match.id,
       poster_path: match.poster_path,
       voteAverage: match.vote_average,
+      localTitle: match.title || t.name,
+      watchLink: regionData.link || null,
       services: pickServices(regionData),
     };
   }
@@ -365,7 +403,13 @@ export default function ReelCheck() {
       }
     }
     await Promise.all(new Array(5).fill(0).map(worker));
+    const at = Date.now();
     setMovies(results);
+    setCheckedRegion(region);
+    setCheckedAt(at);
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({ movies: results, titles: parsedTitles, fileName, region, at }));
+    } catch {}
     setStatus("done");
     setShowSetup(false);
   }
@@ -515,7 +559,7 @@ export default function ReelCheck() {
           </section>
         ) : (
           <button onClick={() => setShowSetup(true)} className="w-full flex items-center justify-between bg-[#0D0D0D] border border-[#333333] rounded-lg px-4 py-2.5 text-sm text-[#B3B3B3] hover:border-[#FFFFFF] transition">
-            <span className="font-mono">{movies.length} titles · {REGIONS.find((r) => r.code === region)?.label}</span>
+            <span className="font-mono">{movies.length} titles · {REGIONS.find((r) => r.code === checkedRegion)?.label}{checkedAt ? ` · ${new Date(checkedAt).toLocaleDateString("de-DE")}` : ""}</span>
             <span className="inline-flex items-center gap-1.5 text-[#FFFFFF]"><Pencil className="w-3.5 h-3.5" /> Edit setup</span>
           </button>
         )}
@@ -597,7 +641,11 @@ export default function ReelCheck() {
         )}
       </main>
 
-      <DetailModal movie={activeMovie} region={region} onClose={() => setActiveMovie(null)} />
+      <DetailModal movie={activeMovie} region={checkedRegion} onClose={() => setActiveMovie(null)} />
+
+      <footer className="px-6 pb-6 pt-10 text-center text-[10px] font-mono" style={{ color: "#555555" }}>
+        v.01 - CCAA 2026
+      </footer>
 
     </div>
   );

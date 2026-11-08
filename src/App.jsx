@@ -227,22 +227,22 @@ function DetailModal({ movie, region, onClose }) {
           </div>
 
           {movie.tmdbId && (
-            <div className="mt-4 flex flex-col gap-1.5">
-              {movie.watchLink && (
-                <a
-                  href={movie.watchLink}
-                  target="_blank" rel="noreferrer"
-                  className="text-xs text-[#FFFFFF] hover:underline inline-flex items-center gap-1"
-                >
-                  Direct links on TMDB <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
+            <div className="mt-4 flex gap-2">
               <a
-                href={`https://www.themoviedb.org/movie/${movie.tmdbId}`}
+                href={movie.watchLink || `https://www.themoviedb.org/movie/${movie.tmdbId}`}
                 target="_blank" rel="noreferrer"
-                className="text-xs text-[#B3B3B3] hover:underline inline-flex items-center gap-1"
+                className="flex-1 flex items-center justify-between gap-2 bg-[#111111] border border-[#333333] hover:border-[#FFFFFF] rounded-md px-2.5 py-2 transition"
               >
-                View on TMDB <ExternalLink className="w-3 h-3" />
+                <span className="text-sm">TMDB</span>
+                <ExternalLink className="w-3.5 h-3.5 text-[#888888] shrink-0" />
+              </a>
+              <a
+                href={movie.lbUrl || `https://letterboxd.com/tmdb/${movie.tmdbId}`}
+                target="_blank" rel="noreferrer"
+                className="flex-1 flex items-center justify-between gap-2 bg-[#111111] border border-[#333333] hover:border-[#FFFFFF] rounded-md px-2.5 py-2 transition"
+              >
+                <span className="text-sm">Letterboxd</span>
+                <ExternalLink className="w-3.5 h-3.5 text-[#888888] shrink-0" />
               </a>
             </div>
           )}
@@ -307,11 +307,13 @@ export default function ReelCheck() {
         const nameKey = keys.find((k) => /name|title/i.test(k)) || "Name";
         const yearKey = keys.find((k) => /year/i.test(k));
         const dateKey = keys.find((k) => /^date$/i.test(k.trim())) || keys.find((k) => /added/i.test(k));
+        const uriKey = keys.find((k) => /letterboxd.*uri|^uri$/i.test(k.trim()));
         const titles = rows
           .map((r) => ({
             name: (r[nameKey] || "").trim(),
             year: yearKey ? (r[yearKey] || "").trim() : "",
             dateAdded: dateKey ? (r[dateKey] || "").trim() : "",
+            lbUrl: uriKey ? (r[uriKey] || "").trim() : "",
           }))
           .filter((t) => t.name);
         setParsedTitles(titles);
@@ -681,7 +683,7 @@ export default function ReelCheck() {
       <DetailModal movie={activeMovie} region={checkedRegion} onClose={() => setActiveMovie(null)} />
 
       <footer className="px-6 pb-6 pt-10 text-center text-[10px] font-mono" style={{ color: "#555555" }}>
-        v.01 - CCAA 2026
+        v.01.2 - CCAA 2026
       </footer>
 
     </div>
